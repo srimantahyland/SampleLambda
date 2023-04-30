@@ -21,10 +21,47 @@ package org.example;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 
+import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
+import software.amazon.awssdk.core.waiters.WaiterResponse;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.ec2.Ec2Client;
+import software.amazon.awssdk.services.ec2.model.DescribeInstancesRequest;
+import software.amazon.awssdk.services.ec2.model.DescribeInstancesResponse;
+import software.amazon.awssdk.services.ec2.model.StopInstancesRequest;
+import software.amazon.awssdk.services.ec2.waiters.Ec2Waiter;
+
 public class LambdaRequestHandler
     implements RequestHandler<String, String> {
     public String handleRequest(String input, Context context) {
         context.getLogger().log("Input: " + input);
+        Region region = Region.US_EAST_1;
+        Ec2Client ec2 = Ec2Client.builder()
+                                 .region(region)
+//                                 .credentialsProvider(ProfileCredentialsProvider.create())
+                                 .build();
+        for ( String instanceId : input.split(",")) {
+            stopInstance(ec2, instanceId, context);
+        }
         return "Hello World - " + input;
+    }
+
+    public static void stopInstance(Ec2Client ec2, String instanceId, Context context) {
+        Ec2Waiter ec2Waiter = Ec2Waiter.builder()
+                                       .overrideConfiguration(b -> b.maxAttempts(100))
+                                       .client(ec2)
+                                       .build();
+        StopInstancesRequest request = StopInstancesRequest.builder()
+                                                           .instanceIds(instanceId)
+                                                           .build();
+
+        context.getLogger().log("Use an Ec2Waiter to wait for the instance to stop. This will take a few minutes.");
+        ec2.stopInstances(request);
+        DescribeInstancesRequest instanceRequest = DescribeInstancesRequest.builder()
+                                                                           .instanceIds(instanceId)
+                                                                           .build();
+
+        WaiterResponse<DescribeInstancesResponse> waiterResponse = ec2Waiter.waitUntilInstanceStopped(instanceRequest);
+        waiterResponse.matched().response().ifPresent(System.out::println);
+        context.getLogger().log("Successfully stopped instance "+instanceId);
     }
 }
